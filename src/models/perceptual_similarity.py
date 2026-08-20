@@ -34,6 +34,34 @@ class PerceptualSimilarityModel(nn.Module):
         )
 
     @staticmethod
+    def preference_logits(
+        distance_left: torch.Tensor,
+        distance_right: torch.Tensor,
+        temperature: float = 0.1,
+    ) -> torch.Tensor:
+        """
+        Convert perceptual distances into two-class preference logits.
+
+        Class 0 -> LEFT
+        Class 1 -> RIGHT
+
+        Smaller distance corresponds to larger logit.
+        """
+
+        if temperature <= 0:
+            raise ValueError("temperature must be > 0")
+
+        logits = torch.stack(
+            [
+                -distance_left,
+                -distance_right,
+            ],
+            dim=1,
+        )
+
+        return logits / temperature
+
+    @staticmethod
     def cosine_distance(
         z1: torch.Tensor,
         z2: torch.Tensor,
