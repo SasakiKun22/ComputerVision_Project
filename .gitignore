@@ -14,8 +14,7 @@ env/
 
 # Datasets
 data/
-datasets/
-dataset/
+scripts/test/
 
 # Model weights
 *.pth
