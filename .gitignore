@@ -1,1 +1,35 @@
-jpegai-attribution/data
+# Python
+__pycache__/
+*.py[cod]
+*.so
+
+# Environments
+.venv/
+venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+
+# Datasets
+data/
+datasets/
+dataset/
+
+# Model weights
+*.pth
+*.pt
+*.ckpt
+
+# Results generated locally
+results/*.csv
+results/*.json
+
+# Logs
+logs/
+wandb/
+
+# OS
+.DS_Store
+Thumbs.db
