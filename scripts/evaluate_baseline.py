@@ -22,6 +22,13 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--checkpoint",
+        type=str,
+        default="./checkpoints/baseline_best.pth",
+        help="Path to the fine-tuned baseline checkpoint.",
+    )
+
+    parser.add_argument(
         "--batch-size",
         type=int,
         default=16,
@@ -104,8 +111,28 @@ def main():
         encoder
     ).to(device)
 
-    model.eval()
+    print(f"Loading checkpoint: {args.checkpoint}")
 
+    checkpoint = torch.load(
+        args.checkpoint,
+        map_location=device,
+    )
+
+    model.load_state_dict(
+        checkpoint["model_state_dict"]
+    )
+
+    print(
+        f"Checkpoint epoch: {checkpoint['epoch']}"
+    )
+
+    print(
+        f"Checkpoint validation 2AFC: "
+        f"{checkpoint['val_accuracy'] * 100:.2f}%"
+    )
+
+    model.eval()
+    
     # ---------------------------------------------------------
     # Evaluation
     # ---------------------------------------------------------
