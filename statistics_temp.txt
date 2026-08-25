@@ -1,3 +1,5 @@
 DINO_baseline_ft = da rerunnare per sicurezza
-DINO_sra_full = carico max 80%; train time 8,52 s; 2AFC eval 91.06%
-DINO_src_half = carico max 87%; train time 8,47 s; 2AFC eval 94.08%
+DINO_sra_full = carico max 80%; train time 8,52 min; 2AFC eval 91.06%
+DINO_src_half = carico max 87%; train time 8,47 min; 2AFC eval 94.08%
+DINO_meta_full = carico max 66%, train time 9,06 min; 2AFC eval 76.04%
+DINO_meta_meta = carico max 82%, train time 8,56 min; 2AFC eval 86.13%
