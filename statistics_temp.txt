@@ -1,5 +1,14 @@
+Mattia on RTX 4070 Super 12GB
 DINO_baseline_ft = da rerunnare per sicurezza
 DINO_sra_full = carico max 80%; train time 8,52 min; 2AFC eval 91.06%
-DINO_src_half = carico max 87%; train time 8,47 min; 2AFC eval 94.08%
+DINO_sra_half = carico max 87%; train time 8,47 min; 2AFC eval 94.08%
 DINO_meta_full = carico max 66%, train time 9,06 min; 2AFC eval 76.04%
-DINO_meta_meta = carico max 82%, train time 8,56 min; 2AFC eval 86.13%
+DINO_meta_half = carico max 82%, train time 8,56 min; 2AFC eval 86.13%
+
+
+
+
+Simone on GTX 1060 6GB
+DINO_baseline_ft = carico max 90%, train time 1h 29min, 2AFC 93.86%
+DINO_sra_full = carico max 80%; train time 1h 38min; 2AFC eval 92.05%
+DINO_sra_half = carico max 85%; train time 1h 33min; 2AFC eval 94.35%
