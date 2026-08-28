@@ -6,26 +6,14 @@ import torch
 from torch.utils.data import DataLoader
 
 from src.datasets.nights import NIGHTSDataset
+from src.models.transforms import get_dino_transform
 
-from src.models.transforms import (
-    get_dino_transform,
-)
+from src.models.vit_baseline import DINOViTBaseline
+from src.models.vit_efficient import DINOViTEfficient
+from src.models.vit_metaformer import DINOViTMetaFormer
+from src.models.vit_moh import DINOViTMoH
 
-from src.models.vit_baseline import (
-    DINOViTBaseline,
-)
-
-from src.models.vit_efficient import (
-    DINOViTEfficient,
-)
-
-from src.models.vit_metaformer import (
-    DINOViTMetaFormer,
-)
-
-from src.models.perceptual_similarity import (
-    PerceptualSimilarityModel,
-)
+from src.models.perceptual_similarity import PerceptualSimilarityModel
 
 
 # =====================================================================
@@ -57,6 +45,8 @@ def parse_args():
             "sra_half",
             "metaformer_all",
             "metaformer_half",
+            "moh_all",
+            "moh_half",
         ],
     )
 
@@ -91,10 +81,9 @@ def parse_args():
     )
 
     # -----------------------------------------------------------------
-    # Fallback values.
+    # Fallback architecture parameters.
     #
-    # Normally SRA / MetaFormer configuration is read directly
-    # from the checkpoint.
+    # Normally these values are recovered from the checkpoint.
     # -----------------------------------------------------------------
 
     parser.add_argument(
@@ -109,6 +98,18 @@ def parse_args():
         default=3,
     )
 
+    parser.add_argument(
+        "--shared-heads",
+        type=int,
+        default=2,
+    )
+
+    parser.add_argument(
+        "--routed-heads",
+        type=int,
+        default=4,
+    )
+
     # -----------------------------------------------------------------
     # Precision
     # -----------------------------------------------------------------
@@ -120,11 +121,7 @@ def parse_args():
     )
 
     # -----------------------------------------------------------------
-    # Optional accuracy value.
-    #
-    # This does NOT recompute 2AFC.
-    # It simply stores the already measured test accuracy in the CSV,
-    # which is useful for final plots/tables.
+    # Previously measured test 2AFC
     # -----------------------------------------------------------------
 
     parser.add_argument(
@@ -133,7 +130,7 @@ def parse_args():
         default=None,
         help=(
             "Previously measured test 2AFC in percentage points "
-            "(e.g. 93.59)."
+            "(for example 94.35)."
         ),
     )
 
@@ -161,14 +158,12 @@ def count_parameters(model):
 
     total = sum(
         parameter.numel()
-        for parameter
-        in model.parameters()
+        for parameter in model.parameters()
     )
 
     trainable = sum(
         parameter.numel()
-        for parameter
-        in model.parameters()
+        for parameter in model.parameters()
         if parameter.requires_grad
     )
 
@@ -176,16 +171,13 @@ def count_parameters(model):
 
 
 # =====================================================================
-# LOAD CHECKPOINT + BUILD CORRECT ARCHITECTURE
+# BUILD MODEL
 # =====================================================================
 
-def build_model(
-    args,
-    device,
-):
+def build_model(args, device):
 
     # -----------------------------------------------------------------
-    # Load checkpoint metadata on CPU first.
+    # Read checkpoint metadata first
     # -----------------------------------------------------------------
 
     checkpoint = torch.load(
@@ -193,10 +185,15 @@ def build_model(
         map_location="cpu",
     )
 
-    architecture_info = {}
+    architecture_info = {
+        "architecture": "",
+        "efficient_layers": 0,
+        "configuration": "",
+        "active_heads": "",
+    }
 
     # =================================================================
-    # STANDARD BASELINE
+    # BASELINE
     # =================================================================
 
     if args.model == "baseline":
@@ -208,13 +205,16 @@ def build_model(
 
         architecture_info = {
             "architecture":
-                "standard_attention",
+                "Standard Attention",
 
             "efficient_layers":
                 0,
 
-            "reduction":
-                "-",
+            "configuration":
+                "12 standard attention blocks",
+
+            "active_heads":
+                "12/12",
         }
 
     # =================================================================
@@ -228,20 +228,16 @@ def build_model(
             args.sr_ratio,
         )
 
-        efficient_layers = (
-            checkpoint.get(
-                "efficient_layers",
-                list(range(12)),
-            )
+        efficient_layers = checkpoint.get(
+            "efficient_layers",
+            list(range(12)),
         )
 
         encoder = DINOViTEfficient(
             pretrained=True,
             freeze=False,
             sr_ratio=sr_ratio,
-            efficient_layers=(
-                efficient_layers
-            ),
+            efficient_layers=efficient_layers,
         )
 
         architecture_info = {
@@ -251,8 +247,11 @@ def build_model(
             "efficient_layers":
                 len(efficient_layers),
 
-            "reduction":
+            "configuration":
                 f"sr_ratio={sr_ratio}",
+
+            "active_heads":
+                "12/12",
         }
 
     # =================================================================
@@ -266,20 +265,16 @@ def build_model(
             args.sr_ratio,
         )
 
-        efficient_layers = (
-            checkpoint.get(
-                "efficient_layers",
-                list(range(6, 12)),
-            )
+        efficient_layers = checkpoint.get(
+            "efficient_layers",
+            list(range(6, 12)),
         )
 
         encoder = DINOViTEfficient(
             pretrained=True,
             freeze=False,
             sr_ratio=sr_ratio,
-            efficient_layers=(
-                efficient_layers
-            ),
+            efficient_layers=efficient_layers,
         )
 
         architecture_info = {
@@ -289,8 +284,11 @@ def build_model(
             "efficient_layers":
                 len(efficient_layers),
 
-            "reduction":
+            "configuration":
                 f"sr_ratio={sr_ratio}",
+
+            "active_heads":
+                "12/12",
         }
 
     # =================================================================
@@ -304,31 +302,30 @@ def build_model(
             args.pool_size,
         )
 
-        metaformer_layers = (
-            checkpoint.get(
-                "metaformer_layers",
-                list(range(12)),
-            )
+        metaformer_layers = checkpoint.get(
+            "metaformer_layers",
+            list(range(12)),
         )
 
         encoder = DINOViTMetaFormer(
             pretrained=True,
             freeze=False,
             pool_size=pool_size,
-            metaformer_layers=(
-                metaformer_layers
-            ),
+            metaformer_layers=metaformer_layers,
         )
 
         architecture_info = {
             "architecture":
-                "MetaFormerPooling",
+                "MetaFormer Pooling",
 
             "efficient_layers":
                 len(metaformer_layers),
 
-            "reduction":
+            "configuration":
                 f"pool_size={pool_size}",
+
+            "active_heads":
+                "N/A",
         }
 
     # =================================================================
@@ -342,42 +339,142 @@ def build_model(
             args.pool_size,
         )
 
-        metaformer_layers = (
-            checkpoint.get(
-                "metaformer_layers",
-                list(range(6, 12)),
-            )
+        metaformer_layers = checkpoint.get(
+            "metaformer_layers",
+            list(range(6, 12)),
         )
 
         encoder = DINOViTMetaFormer(
             pretrained=True,
             freeze=False,
             pool_size=pool_size,
-            metaformer_layers=(
-                metaformer_layers
-            ),
+            metaformer_layers=metaformer_layers,
         )
 
         architecture_info = {
             "architecture":
-                "MetaFormerPooling",
+                "MetaFormer Pooling",
 
             "efficient_layers":
                 len(metaformer_layers),
 
-            "reduction":
+            "configuration":
                 f"pool_size={pool_size}",
+
+            "active_heads":
+                "N/A",
+        }
+
+    # =================================================================
+    # MoH FULL
+    # =================================================================
+
+    elif args.model == "moh_all":
+
+        shared_heads = checkpoint.get(
+            "shared_heads",
+            args.shared_heads,
+        )
+
+        routed_heads = checkpoint.get(
+            "routed_heads",
+            args.routed_heads,
+        )
+
+        moh_layers = checkpoint.get(
+            "moh_layers",
+            list(range(12)),
+        )
+
+        encoder = DINOViTMoH(
+            pretrained=True,
+            freeze=False,
+            shared_heads=shared_heads,
+            routed_heads=routed_heads,
+            moh_layers=moh_layers,
+        )
+
+        active_heads = (
+            shared_heads
+            + routed_heads
+        )
+
+        architecture_info = {
+            "architecture":
+                "Mixture-of-Heads",
+
+            "efficient_layers":
+                len(moh_layers),
+
+            "configuration":
+                (
+                    f"shared={shared_heads},"
+                    f"routed={routed_heads}"
+                ),
+
+            "active_heads":
+                f"{active_heads}/12",
+        }
+
+    # =================================================================
+    # MoH HALF
+    # =================================================================
+
+    elif args.model == "moh_half":
+
+        shared_heads = checkpoint.get(
+            "shared_heads",
+            args.shared_heads,
+        )
+
+        routed_heads = checkpoint.get(
+            "routed_heads",
+            args.routed_heads,
+        )
+
+        moh_layers = checkpoint.get(
+            "moh_layers",
+            list(range(6, 12)),
+        )
+
+        encoder = DINOViTMoH(
+            pretrained=True,
+            freeze=False,
+            shared_heads=shared_heads,
+            routed_heads=routed_heads,
+            moh_layers=moh_layers,
+        )
+
+        active_heads = (
+            shared_heads
+            + routed_heads
+        )
+
+        architecture_info = {
+            "architecture":
+                "Mixture-of-Heads",
+
+            "efficient_layers":
+                len(moh_layers),
+
+            "configuration":
+                (
+                    f"shared={shared_heads},"
+                    f"routed={routed_heads}"
+                ),
+
+            "active_heads":
+                f"{active_heads}/12",
         }
 
     else:
 
         raise ValueError(
-            f"Unsupported model: "
-            f"{args.model}"
+            f"Unsupported model: {args.model}"
         )
 
     # =================================================================
-    # DREAMSIM-LIKE PIPELINE
+    # PERCEPTUAL SIMILARITY WRAPPER
     # =================================================================
 
     model = (
@@ -407,7 +504,7 @@ def build_model(
 
 
 # =====================================================================
-# CSV
+# SAVE CSV
 # =====================================================================
 
 def append_result(
@@ -432,7 +529,8 @@ def append_result(
         "model",
         "architecture",
         "efficient_layers",
-        "reduction",
+        "configuration",
+        "active_heads",
         "batch_size",
         "amp",
         "benchmark_batches",
@@ -513,7 +611,7 @@ def main():
     args = parse_args()
 
     # =================================================================
-    # CUDA CHECK
+    # CUDA
     # =================================================================
 
     if not torch.cuda.is_available():
@@ -527,11 +625,9 @@ def main():
     )
 
     print("=" * 72)
-
     print(
         "GPU INFERENCE BENCHMARK"
     )
-
     print("=" * 72)
 
     print(
@@ -581,13 +677,15 @@ def main():
         seed=42,
     )
 
-    # drop_last ensures every timed batch has exactly the same size.
     loader = DataLoader(
         dataset,
         batch_size=args.batch_size,
         shuffle=False,
         num_workers=args.num_workers,
         pin_memory=True,
+
+        # All timed batches have exactly the same number
+        # of triplets.
         drop_last=True,
     )
 
@@ -621,10 +719,11 @@ def main():
         device,
     )
 
-    total_params, trainable_params = (
-        count_parameters(
-            model
-        )
+    (
+        total_params,
+        trainable_params,
+    ) = count_parameters(
+        model
     )
 
     print()
@@ -646,7 +745,14 @@ def main():
     print(
         "Configuration:",
         architecture_info[
-            "reduction"
+            "configuration"
+        ],
+    )
+
+    print(
+        "Active heads:",
+        architecture_info[
+            "active_heads"
         ],
     )
 
@@ -659,7 +765,9 @@ def main():
 
         print(
             "Checkpoint epoch:",
-            checkpoint["epoch"],
+            checkpoint[
+                "epoch"
+            ],
         )
 
     if "val_accuracy" in checkpoint:
@@ -697,8 +805,8 @@ def main():
             except StopIteration:
 
                 raise RuntimeError(
-                    "Not enough batches for "
-                    "the requested warm-up."
+                    "Not enough batches available "
+                    "for the requested warm-up."
                 )
 
             (
@@ -725,7 +833,7 @@ def main():
     torch.cuda.synchronize()
 
     # -----------------------------------------------------------------
-    # Free references from warm-up.
+    # Remove references from last warm-up batch.
     # -----------------------------------------------------------------
 
     del reference
@@ -736,7 +844,7 @@ def main():
     torch.cuda.synchronize()
 
     # =================================================================
-    # RESET PEAK VRAM
+    # RESET PEAK MEMORY
     # =================================================================
 
     torch.cuda.reset_peak_memory_stats(
@@ -782,7 +890,7 @@ def main():
             )
 
             # ---------------------------------------------------------
-            # Synchronize data transfer before timing.
+            # Ensure data transfer has completed before timing.
             # ---------------------------------------------------------
 
             torch.cuda.synchronize()
@@ -798,7 +906,7 @@ def main():
             start_event.record()
 
             # ---------------------------------------------------------
-            # Timed GPU inference
+            # GPU forward pass only
             # ---------------------------------------------------------
 
             with torch.amp.autocast(
@@ -885,9 +993,14 @@ def main():
                 "efficient_layers"
             ],
 
-        "reduction":
+        "configuration":
             architecture_info[
-                "reduction"
+                "configuration"
+            ],
+
+        "active_heads":
+            architecture_info[
+                "active_heads"
             ],
 
         "batch_size":
@@ -928,17 +1041,39 @@ def main():
     }
 
     # =================================================================
-    # PRINT RESULTS
+    # PRINT
     # =================================================================
 
     print()
     print("=" * 72)
-    print("BENCHMARK RESULTS")
+    print(
+        "BENCHMARK RESULTS"
+    )
     print("=" * 72)
 
     print(
         f"Model                : "
         f"{args.model}"
+    )
+
+    print(
+        f"Architecture         : "
+        f"{architecture_info['architecture']}"
+    )
+
+    print(
+        f"Modified layers      : "
+        f"{architecture_info['efficient_layers']}/12"
+    )
+
+    print(
+        f"Configuration        : "
+        f"{architecture_info['configuration']}"
+    )
+
+    print(
+        f"Active heads         : "
+        f"{architecture_info['active_heads']}"
     )
 
     print(
@@ -989,7 +1124,7 @@ def main():
         )
 
     # =================================================================
-    # SAVE
+    # CSV
     # =================================================================
 
     append_result(
@@ -998,6 +1133,7 @@ def main():
     )
 
     print()
+
     print(
         f"Result appended to: "
         f"{args.output}"
