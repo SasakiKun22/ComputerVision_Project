@@ -24,8 +24,8 @@ def parse_args():
 
     parser = argparse.ArgumentParser(
         description=(
-            "GPU inference benchmark for NIGHTS "
-            "perceptual similarity models."
+            "Evaluate 2AFC and benchmark GPU inference speed "
+            "for NIGHTS perceptual similarity models."
         )
     )
 
@@ -83,7 +83,7 @@ def parse_args():
     # -----------------------------------------------------------------
     # Fallback architecture parameters.
     #
-    # Normally these values are recovered from the checkpoint.
+    # Normally they are recovered directly from the checkpoint.
     # -----------------------------------------------------------------
 
     parser.add_argument(
@@ -111,27 +111,19 @@ def parse_args():
     )
 
     # -----------------------------------------------------------------
-    # Precision
+    # Benchmark precision
+    #
+    # IMPORTANT:
+    # Test 2AFC is always evaluated in FP32 for consistency with the
+    # previous evaluation scripts.
+    #
+    # --amp only changes the inference speed benchmark.
     # -----------------------------------------------------------------
 
     parser.add_argument(
         "--amp",
         action="store_true",
-        help="Run benchmark using FP16 autocast.",
-    )
-
-    # -----------------------------------------------------------------
-    # Previously measured test 2AFC
-    # -----------------------------------------------------------------
-
-    parser.add_argument(
-        "--test-2afc",
-        type=float,
-        default=None,
-        help=(
-            "Previously measured test 2AFC in percentage points "
-            "(for example 94.35)."
-        ),
+        help="Benchmark GPU inference using FP16 autocast.",
     )
 
     # -----------------------------------------------------------------
@@ -151,20 +143,20 @@ def parse_args():
 
 
 # =====================================================================
-# PARAMETER COUNT
+# PARAMETERS
 # =====================================================================
 
 def count_parameters(model):
 
     total = sum(
-        parameter.numel()
-        for parameter in model.parameters()
+        p.numel()
+        for p in model.parameters()
     )
 
     trainable = sum(
-        parameter.numel()
-        for parameter in model.parameters()
-        if parameter.requires_grad
+        p.numel()
+        for p in model.parameters()
+        if p.requires_grad
     )
 
     return total, trainable
@@ -177,20 +169,13 @@ def count_parameters(model):
 def build_model(args, device):
 
     # -----------------------------------------------------------------
-    # Read checkpoint metadata first
+    # Load checkpoint metadata on CPU first
     # -----------------------------------------------------------------
 
     checkpoint = torch.load(
         args.checkpoint,
         map_location="cpu",
     )
-
-    architecture_info = {
-        "architecture": "",
-        "efficient_layers": 0,
-        "configuration": "",
-        "active_heads": "",
-    }
 
     # =================================================================
     # BASELINE
@@ -204,21 +189,14 @@ def build_model(args, device):
         )
 
         architecture_info = {
-            "architecture":
-                "Standard Attention",
-
-            "efficient_layers":
-                0,
-
-            "configuration":
-                "12 standard attention blocks",
-
-            "active_heads":
-                "12/12",
+            "architecture": "Standard Attention",
+            "efficient_layers": 0,
+            "configuration": "standard",
+            "active_heads": "12/12",
         }
 
     # =================================================================
-    # SRA FULL
+    # SRA ALL
     # =================================================================
 
     elif args.model == "sra_all":
@@ -241,17 +219,10 @@ def build_model(args, device):
         )
 
         architecture_info = {
-            "architecture":
-                "SRA",
-
-            "efficient_layers":
-                len(efficient_layers),
-
-            "configuration":
-                f"sr_ratio={sr_ratio}",
-
-            "active_heads":
-                "12/12",
+            "architecture": "SRA",
+            "efficient_layers": len(efficient_layers),
+            "configuration": f"sr_ratio={sr_ratio}",
+            "active_heads": "12/12",
         }
 
     # =================================================================
@@ -278,21 +249,14 @@ def build_model(args, device):
         )
 
         architecture_info = {
-            "architecture":
-                "SRA",
-
-            "efficient_layers":
-                len(efficient_layers),
-
-            "configuration":
-                f"sr_ratio={sr_ratio}",
-
-            "active_heads":
-                "12/12",
+            "architecture": "SRA",
+            "efficient_layers": len(efficient_layers),
+            "configuration": f"sr_ratio={sr_ratio}",
+            "active_heads": "12/12",
         }
 
     # =================================================================
-    # METAFORMER FULL
+    # METAFORMER ALL
     # =================================================================
 
     elif args.model == "metaformer_all":
@@ -315,17 +279,10 @@ def build_model(args, device):
         )
 
         architecture_info = {
-            "architecture":
-                "MetaFormer Pooling",
-
-            "efficient_layers":
-                len(metaformer_layers),
-
-            "configuration":
-                f"pool_size={pool_size}",
-
-            "active_heads":
-                "N/A",
+            "architecture": "MetaFormer Pooling",
+            "efficient_layers": len(metaformer_layers),
+            "configuration": f"pool_size={pool_size}",
+            "active_heads": "N/A",
         }
 
     # =================================================================
@@ -352,21 +309,14 @@ def build_model(args, device):
         )
 
         architecture_info = {
-            "architecture":
-                "MetaFormer Pooling",
-
-            "efficient_layers":
-                len(metaformer_layers),
-
-            "configuration":
-                f"pool_size={pool_size}",
-
-            "active_heads":
-                "N/A",
+            "architecture": "MetaFormer Pooling",
+            "efficient_layers": len(metaformer_layers),
+            "configuration": f"pool_size={pool_size}",
+            "active_heads": "N/A",
         }
 
     # =================================================================
-    # MoH FULL
+    # MoH ALL
     # =================================================================
 
     elif args.model == "moh_all":
@@ -394,26 +344,15 @@ def build_model(args, device):
             moh_layers=moh_layers,
         )
 
-        active_heads = (
-            shared_heads
-            + routed_heads
-        )
-
         architecture_info = {
-            "architecture":
-                "Mixture-of-Heads",
-
-            "efficient_layers":
-                len(moh_layers),
-
-            "configuration":
-                (
-                    f"shared={shared_heads},"
-                    f"routed={routed_heads}"
-                ),
-
-            "active_heads":
-                f"{active_heads}/12",
+            "architecture": "Mixture-of-Heads",
+            "efficient_layers": len(moh_layers),
+            "configuration": (
+                f"shared={shared_heads},routed={routed_heads}"
+            ),
+            "active_heads": (
+                f"{shared_heads + routed_heads}/12"
+            ),
         }
 
     # =================================================================
@@ -445,26 +384,15 @@ def build_model(args, device):
             moh_layers=moh_layers,
         )
 
-        active_heads = (
-            shared_heads
-            + routed_heads
-        )
-
         architecture_info = {
-            "architecture":
-                "Mixture-of-Heads",
-
-            "efficient_layers":
-                len(moh_layers),
-
-            "configuration":
-                (
-                    f"shared={shared_heads},"
-                    f"routed={routed_heads}"
-                ),
-
-            "active_heads":
-                f"{active_heads}/12",
+            "architecture": "Mixture-of-Heads",
+            "efficient_layers": len(moh_layers),
+            "configuration": (
+                f"shared={shared_heads},routed={routed_heads}"
+            ),
+            "active_heads": (
+                f"{shared_heads + routed_heads}/12"
+            ),
         }
 
     else:
@@ -474,24 +402,19 @@ def build_model(args, device):
         )
 
     # =================================================================
-    # PERCEPTUAL SIMILARITY WRAPPER
+    # DREAMSIM-LIKE WRAPPER
     # =================================================================
 
-    model = (
-        PerceptualSimilarityModel(
-            encoder
-        )
-        .to(device)
-    )
+    model = PerceptualSimilarityModel(
+        encoder
+    ).to(device)
 
     # =================================================================
     # LOAD TRAINED WEIGHTS
     # =================================================================
 
     model.load_state_dict(
-        checkpoint[
-            "model_state_dict"
-        ]
+        checkpoint["model_state_dict"]
     )
 
     model.eval()
@@ -504,69 +427,7 @@ def build_model(args, device):
 
 
 # =====================================================================
-# SAVE CSV
-# =====================================================================
-
-def append_result(
-    output_path,
-    result,
-):
-
-    output_path = Path(
-        output_path
-    )
-
-    output_path.parent.mkdir(
-        parents=True,
-        exist_ok=True,
-    )
-
-    file_exists = (
-        output_path.exists()
-    )
-
-    fieldnames = [
-        "model",
-        "architecture",
-        "efficient_layers",
-        "configuration",
-        "active_heads",
-        "batch_size",
-        "amp",
-        "benchmark_batches",
-        "num_triplets",
-        "total_gpu_time_ms",
-        "ms_per_batch",
-        "ms_per_triplet",
-        "triplets_per_second",
-        "peak_vram_mb",
-        "parameters",
-        "trainable_parameters",
-        "test_2afc",
-    ]
-
-    with open(
-        output_path,
-        "a",
-        newline="",
-    ) as file:
-
-        writer = csv.DictWriter(
-            file,
-            fieldnames=fieldnames,
-        )
-
-        if not file_exists:
-
-            writer.writeheader()
-
-        writer.writerow(
-            result
-        )
-
-
-# =====================================================================
-# MOVE BATCH TO GPU
+# PREPARE GPU BATCH
 # =====================================================================
 
 def prepare_batch(
@@ -603,6 +464,550 @@ def prepare_batch(
 
 
 # =====================================================================
+# TEST 2AFC
+# =====================================================================
+
+@torch.inference_mode()
+def evaluate_2afc(
+    model,
+    loader,
+    device,
+):
+
+    model.eval()
+
+    correct = 0
+    total = 0
+
+    distance_left_sum = 0.0
+    distance_right_sum = 0.0
+
+    print()
+    print("=" * 72)
+    print("FULL TEST 2AFC EVALUATION")
+    print("=" * 72)
+
+    for batch_idx, batch in enumerate(
+        loader
+    ):
+
+        reference, left, right = (
+            prepare_batch(
+                batch,
+                device,
+            )
+        )
+
+        target = batch[
+            "target"
+        ].long().to(
+            device,
+            non_blocking=True,
+        )
+
+        # -------------------------------------------------------------
+        # FP32 evaluation.
+        #
+        # No autocast here so that this metric remains comparable to
+        # evaluate_baseline.py, evaluate_sra.py, etc.
+        # -------------------------------------------------------------
+
+        output = model(
+            reference,
+            left,
+            right,
+        )
+
+        prediction = output[
+            "prediction"
+        ]
+
+        correct += (
+            prediction
+            == target
+        ).sum().item()
+
+        total += (
+            target.numel()
+        )
+
+        distance_left_sum += (
+            output[
+                "distance_left"
+            ]
+            .sum()
+            .item()
+        )
+
+        distance_right_sum += (
+            output[
+                "distance_right"
+            ]
+            .sum()
+            .item()
+        )
+
+        if (
+            (batch_idx + 1) % 10 == 0
+            or batch_idx
+            == len(loader) - 1
+        ):
+
+            running_accuracy = (
+                correct
+                / total
+                * 100.0
+            )
+
+            print(
+                f"Batch "
+                f"{batch_idx + 1:4d}/"
+                f"{len(loader):4d}"
+                f" | "
+                f"2AFC: "
+                f"{running_accuracy:.2f}%"
+            )
+
+    accuracy = (
+        correct
+        / total
+    )
+
+    mean_distance_left = (
+        distance_left_sum
+        / total
+    )
+
+    mean_distance_right = (
+        distance_right_sum
+        / total
+    )
+
+    print()
+    print(
+        f"Correct    : "
+        f"{correct}/{total}"
+    )
+
+    print(
+        f"Test 2AFC  : "
+        f"{accuracy * 100:.2f}%"
+    )
+
+    print(
+        f"Mean d(L)  : "
+        f"{mean_distance_left:.6f}"
+    )
+
+    print(
+        f"Mean d(R)  : "
+        f"{mean_distance_right:.6f}"
+    )
+
+    return {
+        "accuracy": accuracy,
+        "correct": correct,
+        "total": total,
+        "mean_distance_left": (
+            mean_distance_left
+        ),
+        "mean_distance_right": (
+            mean_distance_right
+        ),
+    }
+
+
+# =====================================================================
+# GPU BENCHMARK
+# =====================================================================
+
+@torch.inference_mode()
+def benchmark_inference(
+    model,
+    loader,
+    device,
+    warmup_batches,
+    benchmark_batches,
+    use_amp,
+):
+
+    model.eval()
+
+    print()
+    print("=" * 72)
+    print("GPU INFERENCE BENCHMARK")
+    print("=" * 72)
+
+    loader_iterator = iter(
+        loader
+    )
+
+    # =================================================================
+    # WARM-UP
+    # =================================================================
+
+    print(
+        f"Warm-up batches: "
+        f"{warmup_batches}"
+    )
+
+    for _ in range(
+        warmup_batches
+    ):
+
+        try:
+
+            batch = next(
+                loader_iterator
+            )
+
+        except StopIteration:
+
+            raise RuntimeError(
+                "Not enough batches for warm-up."
+            )
+
+        reference, left, right = (
+            prepare_batch(
+                batch,
+                device,
+            )
+        )
+
+        with torch.amp.autocast(
+            device_type="cuda",
+            dtype=torch.float16,
+            enabled=use_amp,
+        ):
+
+            model(
+                reference,
+                left,
+                right,
+            )
+
+    torch.cuda.synchronize()
+
+    # Remove last warm-up batch references.
+    del batch
+    del reference
+    del left
+    del right
+
+    torch.cuda.synchronize()
+
+    # =================================================================
+    # RESET PEAK VRAM
+    # =================================================================
+
+    torch.cuda.reset_peak_memory_stats(
+        device
+    )
+
+    # =================================================================
+    # TIMING
+    # =================================================================
+
+    total_gpu_time_ms = 0.0
+
+    measured_batches = 0
+    measured_triplets = 0
+
+    print(
+        f"Requested benchmark batches: "
+        f"{benchmark_batches}"
+    )
+
+    for _ in range(
+        benchmark_batches
+    ):
+
+        try:
+
+            batch = next(
+                loader_iterator
+            )
+
+        except StopIteration:
+
+            break
+
+        reference, left, right = (
+            prepare_batch(
+                batch,
+                device,
+            )
+        )
+
+        # -------------------------------------------------------------
+        # Finish H2D transfer before timing.
+        # -------------------------------------------------------------
+
+        torch.cuda.synchronize()
+
+        start_event = torch.cuda.Event(
+            enable_timing=True
+        )
+
+        end_event = torch.cuda.Event(
+            enable_timing=True
+        )
+
+        start_event.record()
+
+        # -------------------------------------------------------------
+        # Only the model forward is timed.
+        # -------------------------------------------------------------
+
+        with torch.amp.autocast(
+            device_type="cuda",
+            dtype=torch.float16,
+            enabled=use_amp,
+        ):
+
+            model(
+                reference,
+                left,
+                right,
+            )
+
+        end_event.record()
+
+        torch.cuda.synchronize()
+
+        elapsed_ms = (
+            start_event.elapsed_time(
+                end_event
+            )
+        )
+
+        total_gpu_time_ms += (
+            elapsed_ms
+        )
+
+        measured_batches += 1
+
+        measured_triplets += (
+            reference.shape[0]
+        )
+
+    if measured_batches == 0:
+
+        raise RuntimeError(
+            "No benchmark batches were measured."
+        )
+
+    # =================================================================
+    # COMPUTE METRICS
+    # =================================================================
+
+    ms_per_batch = (
+        total_gpu_time_ms
+        / measured_batches
+    )
+
+    ms_per_triplet = (
+        total_gpu_time_ms
+        / measured_triplets
+    )
+
+    total_gpu_time_seconds = (
+        total_gpu_time_ms
+        / 1000.0
+    )
+
+    triplets_per_second = (
+        measured_triplets
+        / total_gpu_time_seconds
+    )
+
+    # -------------------------------------------------------------
+    # Every triplet requires:
+    #
+    # reference + left + right
+    #
+    # therefore 3 images.
+    # -------------------------------------------------------------
+
+    measured_images = (
+        measured_triplets
+        * 3
+    )
+
+    ms_per_image = (
+        total_gpu_time_ms
+        / measured_images
+    )
+
+    images_per_second = (
+        measured_images
+        / total_gpu_time_seconds
+    )
+
+    peak_vram_mb = (
+        torch.cuda.max_memory_allocated(
+            device
+        )
+        / (1024 ** 2)
+    )
+
+    print()
+
+    print(
+        f"Measured batches    : "
+        f"{measured_batches}"
+    )
+
+    print(
+        f"Measured triplets   : "
+        f"{measured_triplets}"
+    )
+
+    print(
+        f"Total GPU time      : "
+        f"{total_gpu_time_ms:.3f} ms"
+    )
+
+    print(
+        f"Time / batch        : "
+        f"{ms_per_batch:.3f} ms"
+    )
+
+    print(
+        f"Time / triplet      : "
+        f"{ms_per_triplet:.3f} ms"
+    )
+
+    print(
+        f"Triplets / second   : "
+        f"{triplets_per_second:.2f}"
+    )
+
+    print(
+        f"Time / image        : "
+        f"{ms_per_image:.3f} ms"
+    )
+
+    print(
+        f"Images / second     : "
+        f"{images_per_second:.2f}"
+    )
+
+    print(
+        f"Peak inference VRAM : "
+        f"{peak_vram_mb:.2f} MB"
+    )
+
+    return {
+        "benchmark_batches":
+            measured_batches,
+
+        "num_triplets":
+            measured_triplets,
+
+        "num_images":
+            measured_images,
+
+        "total_gpu_time_ms":
+            total_gpu_time_ms,
+
+        "ms_per_batch":
+            ms_per_batch,
+
+        "ms_per_triplet":
+            ms_per_triplet,
+
+        "triplets_per_second":
+            triplets_per_second,
+
+        "ms_per_image":
+            ms_per_image,
+
+        "images_per_second":
+            images_per_second,
+
+        "peak_vram_mb":
+            peak_vram_mb,
+    }
+
+
+# =====================================================================
+# SAVE CSV
+# =====================================================================
+
+def append_result(
+    output_path,
+    result,
+):
+
+    output_path = Path(
+        output_path
+    )
+
+    output_path.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
+
+    file_exists = (
+        output_path.exists()
+    )
+
+    fieldnames = [
+        "model",
+        "architecture",
+        "efficient_layers",
+        "configuration",
+        "active_heads",
+        "batch_size",
+        "benchmark_amp",
+
+        "test_correct",
+        "test_total",
+        "test_2afc",
+        "mean_distance_left",
+        "mean_distance_right",
+
+        "benchmark_batches",
+        "num_triplets",
+        "num_images",
+        "total_gpu_time_ms",
+        "ms_per_batch",
+        "ms_per_triplet",
+        "triplets_per_second",
+        "ms_per_image",
+        "images_per_second",
+
+        "peak_vram_mb",
+
+        "parameters",
+        "trainable_parameters",
+
+        "checkpoint_epoch",
+        "checkpoint_val_2afc",
+    ]
+
+    with open(
+        output_path,
+        "a",
+        newline="",
+    ) as file:
+
+        writer = csv.DictWriter(
+            file,
+            fieldnames=fieldnames,
+        )
+
+        if not file_exists:
+
+            writer.writeheader()
+
+        writer.writerow(
+            result
+        )
+
+
+# =====================================================================
 # MAIN
 # =====================================================================
 
@@ -625,9 +1030,7 @@ def main():
     )
 
     print("=" * 72)
-    print(
-        "GPU INFERENCE BENCHMARK"
-    )
+    print("NIGHTS MODEL EVALUATION + BENCHMARK")
     print("=" * 72)
 
     print(
@@ -651,18 +1054,8 @@ def main():
     )
 
     print(
-        "AMP:",
+        "Benchmark AMP:",
         args.amp,
-    )
-
-    print(
-        "Warm-up batches:",
-        args.warmup_batches,
-    )
-
-    print(
-        "Requested benchmark batches:",
-        args.benchmark_batches,
     )
 
     # =================================================================
@@ -677,15 +1070,33 @@ def main():
         seed=42,
     )
 
-    loader = DataLoader(
+    # -----------------------------------------------------------------
+    # Evaluation loader:
+    #
+    # drop_last=False because 2AFC must use the ENTIRE test set.
+    # -----------------------------------------------------------------
+
+    evaluation_loader = DataLoader(
         dataset,
         batch_size=args.batch_size,
         shuffle=False,
         num_workers=args.num_workers,
         pin_memory=True,
+        drop_last=False,
+    )
 
-        # All timed batches have exactly the same number
-        # of triplets.
+    # -----------------------------------------------------------------
+    # Benchmark loader:
+    #
+    # drop_last=True guarantees identical batch sizes during timing.
+    # -----------------------------------------------------------------
+
+    benchmark_loader = DataLoader(
+        dataset,
+        batch_size=args.batch_size,
+        shuffle=False,
+        num_workers=args.num_workers,
+        pin_memory=True,
         drop_last=True,
     )
 
@@ -697,8 +1108,13 @@ def main():
     )
 
     print(
-        "Full batches available:",
-        len(loader),
+        "Evaluation batches:",
+        len(evaluation_loader),
+    )
+
+    print(
+        "Full benchmark batches:",
+        len(benchmark_loader),
     )
 
     # =================================================================
@@ -761,222 +1177,78 @@ def main():
         f"{total_params:,}"
     )
 
-    if "epoch" in checkpoint:
-
-        print(
-            "Checkpoint epoch:",
-            checkpoint[
-                "epoch"
-            ],
-        )
-
-    if "val_accuracy" in checkpoint:
-
-        print(
-            f"Checkpoint val 2AFC: "
-            f"{checkpoint['val_accuracy'] * 100:.2f}%"
-        )
-
     # =================================================================
-    # WARM-UP
+    # 1. FULL TEST EVALUATION
     # =================================================================
 
-    print()
-    print(
-        "Starting GPU warm-up..."
+    evaluation_results = (
+        evaluate_2afc(
+            model=model,
+            loader=evaluation_loader,
+            device=device,
+        )
     )
 
-    loader_iterator = iter(
-        loader
-    )
-
-    with torch.inference_mode():
-
-        for warmup_index in range(
-            args.warmup_batches
-        ):
-
-            try:
-
-                batch = next(
-                    loader_iterator
-                )
-
-            except StopIteration:
-
-                raise RuntimeError(
-                    "Not enough batches available "
-                    "for the requested warm-up."
-                )
-
-            (
-                reference,
-                left,
-                right,
-            ) = prepare_batch(
-                batch,
-                device,
-            )
-
-            with torch.amp.autocast(
-                device_type="cuda",
-                dtype=torch.float16,
-                enabled=args.amp,
-            ):
-
-                model(
-                    reference,
-                    left,
-                    right,
-                )
-
-    torch.cuda.synchronize()
-
     # -----------------------------------------------------------------
-    # Remove references from last warm-up batch.
+    # Make sure evaluation has completely finished before benchmark.
     # -----------------------------------------------------------------
-
-    del reference
-    del left
-    del right
-    del batch
 
     torch.cuda.synchronize()
 
     # =================================================================
-    # RESET PEAK MEMORY
+    # 2. GPU INFERENCE BENCHMARK
     # =================================================================
 
-    torch.cuda.reset_peak_memory_stats(
-        device
+    benchmark_results = (
+        benchmark_inference(
+            model=model,
+            loader=benchmark_loader,
+            device=device,
+            warmup_batches=(
+                args.warmup_batches
+            ),
+            benchmark_batches=(
+                args.benchmark_batches
+            ),
+            use_amp=args.amp,
+        )
     )
 
     # =================================================================
-    # BENCHMARK
+    # CHECKPOINT INFO
     # =================================================================
 
-    print()
-    print(
-        "Starting benchmark..."
+    checkpoint_epoch = (
+        checkpoint.get(
+            "epoch",
+            ""
+        )
     )
 
-    total_gpu_time_ms = 0.0
-    measured_batches = 0
-    measured_triplets = 0
+    checkpoint_val_accuracy = (
+        checkpoint.get(
+            "val_accuracy",
+            None,
+        )
+    )
 
-    with torch.inference_mode():
+    if (
+        checkpoint_val_accuracy
+        is not None
+    ):
 
-        for benchmark_index in range(
-            args.benchmark_batches
-        ):
-
-            try:
-
-                batch = next(
-                    loader_iterator
-                )
-
-            except StopIteration:
-
-                break
-
-            (
-                reference,
-                left,
-                right,
-            ) = prepare_batch(
-                batch,
-                device,
-            )
-
-            # ---------------------------------------------------------
-            # Ensure data transfer has completed before timing.
-            # ---------------------------------------------------------
-
-            torch.cuda.synchronize()
-
-            start_event = torch.cuda.Event(
-                enable_timing=True
-            )
-
-            end_event = torch.cuda.Event(
-                enable_timing=True
-            )
-
-            start_event.record()
-
-            # ---------------------------------------------------------
-            # GPU forward pass only
-            # ---------------------------------------------------------
-
-            with torch.amp.autocast(
-                device_type="cuda",
-                dtype=torch.float16,
-                enabled=args.amp,
-            ):
-
-                model(
-                    reference,
-                    left,
-                    right,
-                )
-
-            end_event.record()
-
-            torch.cuda.synchronize()
-
-            elapsed_ms = (
-                start_event.elapsed_time(
-                    end_event
-                )
-            )
-
-            total_gpu_time_ms += (
-                elapsed_ms
-            )
-
-            measured_batches += 1
-
-            measured_triplets += (
-                reference.shape[0]
-            )
-
-    if measured_batches == 0:
-
-        raise RuntimeError(
-            "No benchmark batches were measured."
+        checkpoint_val_2afc = (
+            checkpoint_val_accuracy
+            * 100.0
         )
 
+    else:
+
+        checkpoint_val_2afc = ""
+
     # =================================================================
-    # RESULTS
+    # FINAL RESULT
     # =================================================================
-
-    ms_per_batch = (
-        total_gpu_time_ms
-        / measured_batches
-    )
-
-    ms_per_triplet = (
-        total_gpu_time_ms
-        / measured_triplets
-    )
-
-    total_gpu_time_seconds = (
-        total_gpu_time_ms
-        / 1000.0
-    )
-
-    throughput = (
-        measured_triplets
-        / total_gpu_time_seconds
-    )
-
-    peak_vram_mb = (
-        torch.cuda.max_memory_allocated(
-            device
-        )
-        / (1024 ** 2)
-    )
 
     result = {
 
@@ -1006,29 +1278,96 @@ def main():
         "batch_size":
             args.batch_size,
 
-        "amp":
+        "benchmark_amp":
             args.amp,
 
+        # -------------------------------------------------------------
+        # Accuracy
+        # -------------------------------------------------------------
+
+        "test_correct":
+            evaluation_results[
+                "correct"
+            ],
+
+        "test_total":
+            evaluation_results[
+                "total"
+            ],
+
+        "test_2afc":
+            evaluation_results[
+                "accuracy"
+            ]
+            * 100.0,
+
+        "mean_distance_left":
+            evaluation_results[
+                "mean_distance_left"
+            ],
+
+        "mean_distance_right":
+            evaluation_results[
+                "mean_distance_right"
+            ],
+
+        # -------------------------------------------------------------
+        # Speed
+        # -------------------------------------------------------------
+
         "benchmark_batches":
-            measured_batches,
+            benchmark_results[
+                "benchmark_batches"
+            ],
 
         "num_triplets":
-            measured_triplets,
+            benchmark_results[
+                "num_triplets"
+            ],
+
+        "num_images":
+            benchmark_results[
+                "num_images"
+            ],
 
         "total_gpu_time_ms":
-            total_gpu_time_ms,
+            benchmark_results[
+                "total_gpu_time_ms"
+            ],
 
         "ms_per_batch":
-            ms_per_batch,
+            benchmark_results[
+                "ms_per_batch"
+            ],
 
         "ms_per_triplet":
-            ms_per_triplet,
+            benchmark_results[
+                "ms_per_triplet"
+            ],
 
         "triplets_per_second":
-            throughput,
+            benchmark_results[
+                "triplets_per_second"
+            ],
+
+        "ms_per_image":
+            benchmark_results[
+                "ms_per_image"
+            ],
+
+        "images_per_second":
+            benchmark_results[
+                "images_per_second"
+            ],
+
+        # -------------------------------------------------------------
+        # Memory / size
+        # -------------------------------------------------------------
 
         "peak_vram_mb":
-            peak_vram_mb,
+            benchmark_results[
+                "peak_vram_mb"
+            ],
 
         "parameters":
             total_params,
@@ -1036,19 +1375,33 @@ def main():
         "trainable_parameters":
             trainable_params,
 
-        "test_2afc":
-            args.test_2afc,
+        # -------------------------------------------------------------
+        # Checkpoint metadata
+        # -------------------------------------------------------------
+
+        "checkpoint_epoch":
+            checkpoint_epoch,
+
+        "checkpoint_val_2afc":
+            checkpoint_val_2afc,
     }
 
     # =================================================================
-    # PRINT
+    # SAVE
+    # =================================================================
+
+    append_result(
+        args.output,
+        result,
+    )
+
+    # =================================================================
+    # FINAL SUMMARY
     # =================================================================
 
     print()
     print("=" * 72)
-    print(
-        "BENCHMARK RESULTS"
-    )
+    print("FINAL SUMMARY")
     print("=" * 72)
 
     print(
@@ -1057,58 +1410,25 @@ def main():
     )
 
     print(
-        f"Architecture         : "
-        f"{architecture_info['architecture']}"
+        f"Test 2AFC            : "
+        f"{result['test_2afc']:.2f}%"
     )
 
     print(
-        f"Modified layers      : "
-        f"{architecture_info['efficient_layers']}/12"
-    )
-
-    print(
-        f"Configuration        : "
-        f"{architecture_info['configuration']}"
-    )
-
-    print(
-        f"Active heads         : "
-        f"{architecture_info['active_heads']}"
-    )
-
-    print(
-        f"Measured batches     : "
-        f"{measured_batches}"
-    )
-
-    print(
-        f"Measured triplets    : "
-        f"{measured_triplets}"
-    )
-
-    print(
-        f"Total GPU time       : "
-        f"{total_gpu_time_ms:.3f} ms"
-    )
-
-    print(
-        f"Mean time / batch    : "
-        f"{ms_per_batch:.3f} ms"
-    )
-
-    print(
-        f"Mean time / triplet  : "
-        f"{ms_per_triplet:.3f} ms"
+        f"Latency              : "
+        f"{result['ms_per_triplet']:.3f} "
+        f"ms/triplet"
     )
 
     print(
         f"Throughput           : "
-        f"{throughput:.2f} triplets/s"
+        f"{result['triplets_per_second']:.2f} "
+        f"triplets/s"
     )
 
     print(
         f"Peak inference VRAM  : "
-        f"{peak_vram_mb:.2f} MB"
+        f"{result['peak_vram_mb']:.2f} MB"
     )
 
     print(
@@ -1116,26 +1436,10 @@ def main():
         f"{total_params:,}"
     )
 
-    if args.test_2afc is not None:
-
-        print(
-            f"Test 2AFC            : "
-            f"{args.test_2afc:.2f}%"
-        )
-
-    # =================================================================
-    # CSV
-    # =================================================================
-
-    append_result(
-        args.output,
-        result,
-    )
-
     print()
 
     print(
-        f"Result appended to: "
+        f"Result saved to: "
         f"{args.output}"
     )
 
