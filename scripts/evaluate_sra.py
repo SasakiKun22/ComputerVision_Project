@@ -16,7 +16,10 @@ from src.models.perceptual_similarity import PerceptualSimilarityModel
 def parse_args():
 
     parser = argparse.ArgumentParser(
-        description="Evaluate SRA DINO ViT on NIGHTS."
+        description=(
+            "Evaluate DINO ViT-B/16 with "
+            "Spatial Reduction Attention on NIGHTS."
+        )
     )
 
     parser.add_argument(
@@ -29,28 +32,13 @@ def parse_args():
         "--checkpoint",
         type=str,
         required=True,
-    )
-
-    parser.add_argument(
-        "--mode",
-        type=str,
-        choices=[
-            "all",
-            "last_half",
-        ],
-        required=True,
-    )
-
-    parser.add_argument(
-        "--sr-ratio",
-        type=int,
-        default=2,
+        help="Path to the trained SRA checkpoint.",
     )
 
     parser.add_argument(
         "--batch-size",
         type=int,
-        default=16,
+        default=32,
     )
 
     parser.add_argument(
@@ -63,25 +51,35 @@ def parse_args():
         "--subset-fraction",
         type=float,
         default=1.0,
+        help=(
+            "Fraction of the NIGHTS test split to evaluate. "
+            "Use 1.0 for final evaluation."
+        ),
     )
 
     return parser.parse_args()
 
 
 # =====================================================================
-# EFFICIENT LAYERS
+# PARAMETER COUNT
 # =====================================================================
 
-def get_efficient_layers(mode):
+def count_parameters(model):
 
-    if mode == "all":
-        return list(range(12))
+    total = sum(
+        p.numel()
+        for p in model.parameters()
+    )
 
-    if mode == "last_half":
-        return list(range(6, 12))
+    trainable = sum(
+        p.numel()
+        for p in model.parameters()
+        if p.requires_grad
+    )
 
-    raise ValueError(
-        f"Unsupported mode: {mode}"
+    return (
+        total,
+        trainable,
     )
 
 
@@ -93,23 +91,24 @@ def main():
 
     args = parse_args()
 
+    # =================================================================
+    # DEVICE
+    # =================================================================
+
     device = torch.device(
         "cuda"
         if torch.cuda.is_available()
         else "cpu"
     )
 
-    efficient_layers = (
-        get_efficient_layers(
-            args.mode
-        )
-    )
-
-    print("=" * 70)
+    print("=" * 72)
     print("NIGHTS SRA EVALUATION")
-    print("=" * 70)
+    print("=" * 72)
 
-    print("Device:", device)
+    print(
+        "Device:",
+        device,
+    )
 
     if device.type == "cuda":
 
@@ -118,38 +117,104 @@ def main():
             torch.cuda.get_device_name(0),
         )
 
+    # =================================================================
+    # LOAD CHECKPOINT METADATA
+    # =================================================================
+
+    print()
+    print(
+        "Reading checkpoint:",
+        args.checkpoint,
+    )
+
+    checkpoint = torch.load(
+        args.checkpoint,
+        map_location="cpu",
+    )
+
+    # -----------------------------------------------------------------
+    # Required architecture metadata
+    # -----------------------------------------------------------------
+
+    required_metadata = [
+        "mode",
+        "sr_ratio",
+        "efficient_layers",
+    ]
+
+    for key in required_metadata:
+
+        if key not in checkpoint:
+
+            raise ValueError(
+                f"Checkpoint does not contain required metadata "
+                f"'{key}'. Make sure the checkpoint was produced "
+                f"with the updated train_sra.py."
+            )
+
+    mode = checkpoint[
+        "mode"
+    ]
+
+    sr_ratio = checkpoint[
+        "sr_ratio"
+    ]
+
+    efficient_layers = checkpoint[
+        "efficient_layers"
+    ]
+
+    # -----------------------------------------------------------------
+    # Print checkpoint information
+    # -----------------------------------------------------------------
+
+    print()
+    print(
+        "Architecture information:"
+    )
+
     print(
         "Mode:",
-        args.mode,
+        mode,
     )
 
     print(
         "SR ratio:",
-        args.sr_ratio,
+        sr_ratio,
     )
 
     print(
-        "Efficient layers:",
+        "SRA layers:",
         efficient_layers,
     )
 
     print(
-        "Checkpoint:",
-        args.checkpoint,
+        "Modified layers:",
+        f"{len(efficient_layers)}/12",
     )
+
+    if "epoch" in checkpoint:
+
+        print(
+            "Best epoch:",
+            checkpoint["epoch"],
+        )
+
+    if "val_accuracy" in checkpoint:
+
+        print(
+            f"Checkpoint validation 2AFC: "
+            f"{checkpoint['val_accuracy'] * 100:.2f}%"
+        )
 
     # =================================================================
     # DATASET
     # =================================================================
 
-    transform = (
-        get_dino_transform()
-    )
-
     dataset = NIGHTSDataset(
         root_dir=args.data_root,
         split="test",
-        transform=transform,
+        transform=get_dino_transform(),
         subset_fraction=(
             args.subset_fraction
         ),
@@ -164,9 +229,11 @@ def main():
         pin_memory=(
             device.type == "cuda"
         ),
+        drop_last=False,
     )
 
     print()
+
     print(
         "Test triplets:",
         len(dataset),
@@ -177,8 +244,13 @@ def main():
         args.batch_size,
     )
 
+    print(
+        "Test batches:",
+        len(loader),
+    )
+
     # =================================================================
-    # MODEL
+    # BUILD MODEL
     # =================================================================
 
     print()
@@ -189,7 +261,7 @@ def main():
     encoder = DINOViTEfficient(
         pretrained=True,
         freeze=False,
-        sr_ratio=args.sr_ratio,
+        sr_ratio=sr_ratio,
         efficient_layers=(
             efficient_layers
         ),
@@ -202,18 +274,31 @@ def main():
         .to(device)
     )
 
-    # =================================================================
-    # CHECKPOINT
-    # =================================================================
+    # -----------------------------------------------------------------
+    # Show actual architecture
+    # -----------------------------------------------------------------
 
+    print()
     print(
-        f"Loading checkpoint: "
-        f"{args.checkpoint}"
+        "Transformer attention configuration:"
     )
 
-    checkpoint = torch.load(
-        args.checkpoint,
-        map_location=device,
+    for index, block in enumerate(
+        encoder.get_transformer_blocks()
+    ):
+
+        print(
+            f"Block {index:02d}: "
+            f"{block.attn.__class__.__name__}"
+        )
+
+    # =================================================================
+    # LOAD TRAINED WEIGHTS
+    # =================================================================
+
+    print()
+    print(
+        "Loading trained weights..."
     )
 
     model.load_state_dict(
@@ -225,24 +310,46 @@ def main():
     model.eval()
 
     print(
-        "Checkpoint epoch:",
-        checkpoint["epoch"],
+        "Checkpoint loaded successfully."
+    )
+
+    # =================================================================
+    # PARAMETERS
+    # =================================================================
+
+    (
+        total_params,
+        trainable_params,
+    ) = count_parameters(
+        model
+    )
+
+    print()
+
+    print(
+        f"Total parameters    : "
+        f"{total_params:,}"
     )
 
     print(
-        f"Checkpoint validation 2AFC: "
-        f"{checkpoint['val_accuracy'] * 100:.2f}%"
+        f"Trainable parameters: "
+        f"{trainable_params:,}"
     )
 
     # =================================================================
     # EVALUATION
     # =================================================================
 
-    total = 0
     correct = 0
+    total = 0
 
     distance_left_sum = 0.0
     distance_right_sum = 0.0
+
+    print()
+    print(
+        "Starting evaluation..."
+    )
 
     with torch.inference_mode():
 
@@ -278,6 +385,10 @@ def main():
                 non_blocking=True,
             )
 
+            # ---------------------------------------------------------
+            # Forward
+            # ---------------------------------------------------------
+
             output = model(
                 reference,
                 left,
@@ -288,6 +399,10 @@ def main():
                 "prediction"
             ]
 
+            # ---------------------------------------------------------
+            # Accuracy
+            # ---------------------------------------------------------
+
             correct += (
                 prediction
                 == target
@@ -296,6 +411,10 @@ def main():
             total += (
                 target.numel()
             )
+
+            # ---------------------------------------------------------
+            # Mean distances
+            # ---------------------------------------------------------
 
             distance_left_sum += (
                 output[
@@ -313,6 +432,10 @@ def main():
                 .item()
             )
 
+            # ---------------------------------------------------------
+            # Progress
+            # ---------------------------------------------------------
+
             if (
                 (batch_idx + 1) % 10 == 0
                 or batch_idx
@@ -320,7 +443,8 @@ def main():
             ):
 
                 running_accuracy = (
-                    correct / total
+                    correct
+                    / total
                 )
 
                 print(
@@ -337,7 +461,8 @@ def main():
     # =================================================================
 
     accuracy = (
-        correct / total
+        correct
+        / total
     )
 
     mean_left_distance = (
@@ -351,18 +476,28 @@ def main():
     )
 
     print()
-    print("=" * 70)
+    print("=" * 72)
     print("RESULTS")
-    print("=" * 70)
+    print("=" * 72)
 
     print(
         f"Architecture : "
-        f"SRA {args.mode}"
+        f"SRA {mode}"
     )
 
     print(
         f"SR ratio     : "
-        f"{args.sr_ratio}"
+        f"{sr_ratio}"
+    )
+
+    print(
+        f"Modified     : "
+        f"{len(efficient_layers)}/12 layers"
+    )
+
+    print(
+        f"SRA layers   : "
+        f"{efficient_layers}"
     )
 
     print(
@@ -390,7 +525,12 @@ def main():
         f"{mean_right_distance:.6f}"
     )
 
-    print("=" * 70)
+    print(
+        f"Parameters   : "
+        f"{total_params:,}"
+    )
+
+    print("=" * 72)
 
 
 if __name__ == "__main__":

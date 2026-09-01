@@ -13,7 +13,7 @@ env/
 .idea/
 
 # Datasets
-data/
+data/nights
 scripts/test/
 
 # Model weights
