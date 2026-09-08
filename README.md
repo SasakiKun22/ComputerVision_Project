@@ -1,4 +1,4 @@
-# Efficient Attention for Perceptual Similarity
+# Efficient Attention Impact on Transformer Backbones for Perceptual Similarity
 
 This project investigates the impact of efficient attention mechanisms on Vision Transformer backbones for perceptual image similarity.
 
