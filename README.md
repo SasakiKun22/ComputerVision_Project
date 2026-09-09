@@ -138,7 +138,7 @@ data/
 The dataset can be downloaded from the official DreamSim / NIGHTS release:
 
 **NIGHTS Dataset:**  
-(https://data.csail.mit.edu/nights/nights.zip)
+https://data.csail.mit.edu/nights/nights.zip
 
 After downloading and extracting the dataset, place it inside:
 
@@ -165,7 +165,7 @@ The fine-tuned model checkpoints are not stored directly in the Git repository b
 They can be downloaded from:
 
 **Trained Model Weights:**  
-`https://drive.google.com/drive/folders/10eEp2_Zlf1QLVPi16RaevBg6HGSZS8lU?usp=drive_link`
+https://drive.google.com/drive/folders/10eEp2_Zlf1QLVPi16RaevBg6HGSZS8lU?usp=drive_link
 
 After downloading them, place all checkpoints inside:
 
