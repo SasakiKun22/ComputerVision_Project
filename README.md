@@ -138,7 +138,7 @@ data/
 The dataset can be downloaded from the official DreamSim / NIGHTS release:
 
 **NIGHTS Dataset:**  
-`https://data.csail.mit.edu/nights/nights.zip`
+(https://data.csail.mit.edu/nights/nights.zip)
 
 After downloading and extracting the dataset, place it inside:
 
